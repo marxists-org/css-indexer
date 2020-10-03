@@ -5,19 +5,23 @@ import * as fs from 'fs';
 import {Glob} from 'glob';
 import * as path from 'path';
 import {program, Command} from 'commander';
-import { Observable } from 'rxjs';
+import { Observable, merge } from 'rxjs';
 import DirectedGraph from './digraph';
 
 const stylesheetPathPattern = new RegExp(/<link.*href=(?:"|')(.*\.css)(?:"|')[^>]*>/,'gi');
 const cssImportPattern = new RegExp(/(?:@import )(?:url\()*(?:'|")(.*)(?:"|'|")(?:\))*/g);
 
-const glob = (pattern: string): Observable<string> =>
-  new Observable(function(subscriber: any) {
-    const g = new Glob(pattern);
-    g.on('match', (file: string) => subscriber.next(file));
-    g.on('error', () => subscriber.error());
-    g.on('end', () => subscriber.complete());
-  });
+const glob = (pattern: string[]|string): Observable<string> => {
+  const patterns = Array.isArray(pattern) ? pattern : [pattern];
+  return merge(...patterns.map(pattern =>
+    new Observable<string>(function(subscriber: any) {
+      const g = new Glob(pattern);
+      g.on('match', (file: string) => subscriber.next(file));
+      g.on('error', () => subscriber.error());
+      g.on('end', () => subscriber.complete());
+    })
+  ));
+};
 
 const subscribe = <T>(observable: Observable<T>) => (next_: (each: T, all: T[])=>void):Promise<T[]> => {
   const results: T[] = [];
@@ -45,7 +49,7 @@ async function analyze(pathPattern: string, command: Command) {
 
   const bar = new SingleBar({}, Presets.shades_classic);
   bar.start(0, 0);
-  const filesObservable = glob(`${pathPattern}@(.htm|.html|.css)`);
+  const filesObservable = glob(command.args.map(pattern => `${pattern}@(.htm|.html|.css)`));
   const files = await subscribe(filesObservable)((_, results) => bar.setTotal(results.length));
   const filesSet = new Set(files);
 
@@ -141,7 +145,7 @@ async function stratifyAction(path: string, command: Command) {
 
 (function run() {
   program
-    .command('analyze <path>')
+    .command('analyze [path]')
     .requiredOption('--root <path>')
     .option('-o, --out-file <path>')
     .description('analyze the css dependency graph between css and html files')
