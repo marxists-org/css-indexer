@@ -12,6 +12,15 @@ export default class DirectedGraph {
     return graph;
   }
 
+  static fromArray(list: {vertex: string, edges: string[]}[]): DirectedGraph {
+    const graph = new DirectedGraph();
+    list.forEach(node => {
+      graph.addVertex(node.vertex);
+      node.edges.forEach(neighbor => graph.addEdge(node.vertex, neighbor));
+    });
+    return graph;
+  }
+
   get vertices(): IterableIterator<string> {
     return this.#adjacency.keys();
   }
@@ -97,6 +106,10 @@ export default class DirectedGraph {
     }, {} as {[key:string]: string[]});
   }
 
+  toArray(): {vertex: string, edges: string[]}[] {
+    return Array.from(this.#adjacency.entries())
+      .map(([vertex, edges]) => ({vertex, edges: Array.from(edges.values())}));
+  }
 }
 
 // const g = new DirectedGraph();
