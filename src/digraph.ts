@@ -76,27 +76,25 @@ export default class DirectedGraph {
   }
 
 
-  topological(vertex: string): IterableIterator<string> {
-    return Array.from(this.postorder(vertex)).reverse().values();
+  topological(vertex: string, cb:(vertex: string)=>void) {
+    this.reverse().postorder(vertex, cb);
   }
 
-  postorder(vertex: string): IterableIterator<string> {
-    const order: string[] = [];
+  postorder(vertex: string, cb:(vertex: string)=>void) {
     const visited: Set<string> = new Set();
-    this.postorder_(vertex, order, visited);
-    return order.values();
+    this.postorder_(vertex, visited, cb);
   }
 
-  private postorder_(vertex: string, order: string[], visited: Set<string>) {
+  private postorder_(vertex: string, visited: Set<string>, cb:(vertex:string)=>void) {
     visited.add(vertex);
     const neighbors = this.#adjacency.get(vertex);
     if (neighbors == null) throw new Error();
     Array.from(neighbors.values()).forEach(neighbor => {
       if (!visited.has(neighbor)) {
-        this.postorder_(neighbor, order, visited);
+        this.postorder_(neighbor, visited, cb);
       }
     });
-    order.push(vertex);
+    cb(vertex);
   }
 
   toObject(): {[key:string]: string[]} {

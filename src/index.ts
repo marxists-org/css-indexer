@@ -148,28 +148,66 @@ async function stratifyAction(path: string, command: Command) {
   const {outFile} = command.opts();
   const graphData = JSON.parse(fs.readFileSync(path).toString());
   const graph = DirectedGraph.fromObject(graphData);
+  graph.addVertex('ALL_CSS');
   const inverted = graph.reverse();
+  const allCss = Array.from(inverted.vertices)
+    .filter(vertex => vertex.endsWith('.css'))
+    .forEach(css => {
+      inverted.addEdge('ALL_CSS', css);
+    });
+  const nameToId = new Map<string, string>();
+  const nameToDepsCount = new Map<string, number>();
+  inverted.postorder("ALL_CSS", (name) => {
+    if (name.endsWith('.htm') || name.endsWith('.html')) {
+      nameToDepsCount.set(name, 1);
+      return;
+    }
+
+    let dependants = inverted.getEdges(name) as string[];
+    let count = dependants.length + dependants.reduce((prev, name) => prev + (nameToDepsCount.get(name) || 0), 0);
+    nameToDepsCount.set(name, count);
+  });
+
   const output = inverted.toArray().map(({vertex, edges}) => {
     const type = vertex.endsWith('.css')
           ? "CSS"
           : (vertex.endsWith('.html') || vertex.endsWith('.htm'))
               ? "HTML"
-              : null;
+              : "ROOT";
     if (type == null) throw new Error();
     const name = vertex;
-    const dependants = edges;
-    const imports = graph.getEdges(vertex);
-    // const archiveMatch = firstMatch(name.match(/archive\/([^/]*)\//))
-    // const historyMatch = firstMatch(name.match(/history\/([^/]*)\//))
-    // const archive = (archiveMatch !== null)
-    //   ? `archive/${archiveMatch}`
-    //   : (historyMatch !== null)
-    //     ? `history/${historyMatch}`
-    //     : null;
-
-    const id = uuid();
-    return {dependants, id, imports, name, type};
-  });
+    let id = nameToId.get(name);
+    if (id == null) {
+      id = name == "ALL_CSS" ? "ALL_CSS" : uuid();
+      nameToId.set(name, id);
+    }
+    const dependantNames = edges;
+    const dependants = dependantNames.map(name => {
+      let id = nameToId.get(name);
+      if (id == null) {
+        id = uuid();
+        nameToId.set(name, id);
+      }
+      return id;
+    });
+    const imports = graph.getEdges(vertex).map(name => {
+      let id = nameToId.get(name);
+      if (id == null) {
+        id = uuid();
+        nameToId.set(name, id);
+      }
+      return id;
+    });
+    const dependantCount = {
+      total: nameToDepsCount.get(name),
+      direct: dependants.length,
+      indrect: (nameToDepsCount.get(name) || 0)- dependants.length,
+    };
+    return {dependants, dependantCount, id, imports, name, type};
+  }).reduce((collection: {[key:string]: any}, entry: any) => {
+    collection[entry.id] = entry;
+    return collection;
+  }, {});
 
   const serialized = JSON.stringify(output, null, 4);
 
