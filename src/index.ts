@@ -7,6 +7,8 @@ import * as path from 'path';
 import {program, Command} from 'commander';
 import { Observable, merge } from 'rxjs';
 import DirectedGraph from './digraph';
+import DirectedGraph2 from './digraphtwo';
+import { v4 as uuidv4 } from 'uuid';
 
 const stylesheetPathPattern = new RegExp(/<link.*href=(?:"|')(.*\.css)(?:"|')[^>]*>/,'gi');
 const cssImportPattern = new RegExp(/(?:@import )(?:url\()*(?:'|")(.*)(?:"|'|")(?:\))*/g);
@@ -53,7 +55,9 @@ async function analyze(pathPattern: string, command: Command) {
   const files = await subscribe(filesObservable)((_, results) => bar.setTotal(results.length));
   const filesSet = new Set(files);
 
-  const directedGraph = new DirectedGraph();
+  const nameToGraphKey = new Map<string, Symbol>();
+  // const directedGraph = new DirectedGraph();
+  const directedGraph = new DirectedGraph2<string>();
   filesSet.forEach((file: any) => {
     try {
       const fileContents = fs.readFileSync(file, {encoding: 'utf8'});
@@ -75,16 +79,37 @@ async function analyze(pathPattern: string, command: Command) {
         });
       bar.increment();
       file = file.indexOf(root) == 0 ? file.substr(root.length) : file;
-      dependencies.forEach(to => directedGraph.addEdge(file, to));
+      // dependencies.forEach(to => directedGraph.addEdge(file, to));
+
+      if (!nameToGraphKey.has(file)) {
+        const key = directedGraph.addVertex(file)
+        nameToGraphKey.set(file, key);
+      }
+      const fileKey = nameToGraphKey.get(file) as Symbol;
+
+      dependencies.forEach(dependency => {
+        if (!nameToGraphKey.has(dependency)) {
+          const key = directedGraph.addVertex(dependency);
+          nameToGraphKey.set(dependency, key);
+        }
+        const dependencyKey = nameToGraphKey.get(dependency) as Symbol;
+        directedGraph.addEdge(fileKey, dependencyKey)
+      });
     } catch (e) {
       console.error(e);
     }
   });
-  //const graph = directedGraph.toObject();
-  const graph = directedGraph.toArray();
-  bar.stop();
 
-  const serialized = JSON.stringify(graph, null, 4);
+  const keyToName = new Map(
+    Array.from(nameToGraphKey.entries())
+      .map(([from, to]) => ([to, from])));
+
+  const graph = directedGraph.toArray().map(({vertex, edges}) => {
+    return [keyToName.get(vertex.key), edges.map(key => keyToName.get(key))];
+  });
+
+  bar.stop();
+const serialized = JSON.stringify(graph, null, 4);
 
   if (outFile != null) {
     fs.writeFile(outFile, serialized, (err) => {
@@ -107,109 +132,114 @@ const globObserver = (bar: SingleBar) => {
   };
 };
 
-async function hierarchyAction(path: string, command: Command) {
-  const {outFile} = command.opts();
-  const graphData = JSON.parse(fs.readFileSync(path).toString());
-  const graph = DirectedGraph.fromObject(graphData).reverse();
-  let cssFiles = [...graph.vertices].filter(vertex => vertex.endsWith('.css'));
-
-  function dfs(graph: DirectedGraph, vertex: string):Array<any> {
-    const neighbors = graph.getEdges(vertex);
-    return neighbors.map(neighbor => ({
-      name: neighbor,
-      children: dfs(graph, neighbor),
-    }));
-  }
-
-  const output = {
-    name: "files",
-    children: cssFiles.map(file => ({
-      name: file,
-      children: dfs(graph, file),
-    }))
-  };
-
-  const serialized = JSON.stringify(output, null, 4);
-
-  if (outFile != null) {
-    fs.writeFile(outFile, serialized, (err) => {
-      if (err) {
-        console.log(err);
-      } else {
-        console.log(`Output written to ${outFile}`);
-      }
-    });
-  } else {
-    console.log(serialized);
-  }
-}
-
 async function stratifyAction(path: string, command: Command) {
   const {outFile} = command.opts();
+  // 1. load the data
   const graphData = JSON.parse(fs.readFileSync(path).toString());
-  const graph = DirectedGraph.fromObject(graphData);
-  graph.addVertex('ALL_CSS');
-  const inverted = graph.reverse();
-  const allCss = Array.from(inverted.vertices)
-    .filter(vertex => vertex.endsWith('.css'))
-    .forEach(css => {
-      inverted.addEdge('ALL_CSS', css);
+  const graph = new DirectedGraph2<string>();
+  const nameToKey = new Map<string, Symbol>();
+  for (let [vertex,  edges] of graphData) {
+    if (!nameToKey.has(vertex)) nameToKey.set(vertex, Symbol());
+    let key = nameToKey.get(vertex) as Symbol;
+
+    if (!graph.has(key)) graph.setVertex(key, vertex);
+    (edges as string[]).forEach(edge => {
+      if (!nameToKey.has(edge)) nameToKey.set(edge, Symbol());
+      let edgeKey = nameToKey.get(edge) as Symbol;
+      if (!graph.has(edgeKey)) graph.setVertex(edgeKey, edge);
+      graph.addEdge(key, edgeKey);
     });
-  const nameToId = new Map<string, string>();
-  const nameToDepsCount = new Map<string, number>();
-  inverted.postorder("ALL_CSS", (name) => {
-    if (name.endsWith('.htm') || name.endsWith('.html')) {
-      nameToDepsCount.set(name, 1);
-      return;
-    }
+  }
 
-    let dependants = inverted.getEdges(name) as string[];
-    let count = dependants.length + dependants.reduce((prev, name) => prev + (nameToDepsCount.get(name) || 0), 0);
-    nameToDepsCount.set(name, count);
-  });
+  // 2. invert the graph
+  const inverted = graph.reverse();
 
-  const output = inverted.toArray().map(({vertex, edges}) => {
-    const type = vertex.endsWith('.css')
+  // 3. add ALL_CSS node
+  const allCssKey = inverted.addVertex('ALL_CSS');
+  Array.from(inverted.vertices())
+    .filter(([_, filename]) => filename.endsWith('.css'))
+    .forEach(([cssFile, _]) => inverted.addEdge(allCssKey, cssFile));
+
+  // 4. postorder reduce build nameToDepsCount map
+  const keyToDepsCount = Array.from(inverted.postorder(allCssKey))
+    .reduce((map, key) => {
+      const value = inverted.getVertex(key);
+      if (value == null) throw new Error();
+
+      if (value.endsWith('.htm') || value.endsWith('.html')) {
+        map.set(key, 1);
+        return map;
+      }
+
+      let dependents = Array.from(inverted.getEdges(key));
+      let count = dependents.reduce((prev, key) => prev + (map.get(key) || 0), 0)
+        + dependents.length;
+      map.set(key, count);
+
+      return map;
+    }, new Map<Symbol, number>());
+
+  // 5. make a new graph with calculated properties
+  type DependentsCount = {
+      direct: number,
+      indrect: number,
+      total: number,
+  };
+  type MappedData = {
+    dependentsCount: DependentsCount,
+    imports: Symbol[],
+    name: string,
+    type: "CSS"|"HTML"|"ROOT"|"ARCHIVE",
+  };
+  const output: DirectedGraph2<MappedData> = inverted.map((name, key) => {
+    const type = name.endsWith('.css')
           ? "CSS"
-          : (vertex.endsWith('.html') || vertex.endsWith('.htm'))
+          : (name.endsWith('.html') || name.endsWith('.htm'))
               ? "HTML"
               : "ROOT";
     if (type == null) throw new Error();
-    const name = vertex;
-    let id = nameToId.get(name);
-    if (id == null) {
-      id = name == "ALL_CSS" ? "ALL_CSS" : uuid();
-      nameToId.set(name, id);
-    }
-    const dependantNames = edges;
-    const dependants = dependantNames.map(name => {
-      let id = nameToId.get(name);
-      if (id == null) {
-        id = uuid();
-        nameToId.set(name, id);
-      }
-      return id;
-    });
-    const imports = graph.getEdges(vertex).map(name => {
-      let id = nameToId.get(name);
-      if (id == null) {
-        id = uuid();
-        nameToId.set(name, id);
-      }
-      return id;
-    });
-    const dependantCount = {
-      total: nameToDepsCount.get(name),
-      direct: dependants.length,
-      indrect: (nameToDepsCount.get(name) || 0)- dependants.length,
+    const dependents = Array.from(inverted.getEdges(key));
+    const dependentsCount = {
+      total: keyToDepsCount.get(key) || 0,
+      direct: dependents.length,
+      indrect: (keyToDepsCount.get(key) || 0) - dependents.length,
     };
-    return {dependants, dependantCount, id, imports, name, type};
-  }).reduce((collection: {[key:string]: any}, entry: any) => {
-    collection[entry.id] = entry;
-    return collection;
-  }, {});
+    const imports = Array.from(graph.getEdges(key));
+    return {imports, dependentsCount, name, type};
+  });
 
-  const serialized = JSON.stringify(output, null, 4);
+  type SerializedEntry = {
+    dependentsCount: DependentsCount,
+    dependents: string[],
+    id: string,
+    imports: string[],
+    name: string,
+    type: "CSS"|"HTML"|"ROOT"|"ARCHIVE",
+  };
+  const keyToId = new Map<Symbol, string>();
+  const serializable = Array.from(output.edges())
+    .reduce((dict, [key, edgeKeys]) => {
+      const data = output.getVertex(key);
+      if (data == null) throw new Error('line 274');
+
+      if (!keyToId.has(key)) keyToId.set(key, uuidv4());
+      const id = keyToId.get(key) as string;
+      const dependents = Array.from(edgeKeys).map(key => {
+        if (!keyToId.has(key)) keyToId.set(key, uuidv4());
+        return keyToId.get(key) as string;
+      });
+      const imports = data.imports.map(key => {
+        if (!keyToId.has(key)) keyToId.set(key, uuidv4());
+        return keyToId.get(key) as string;
+      });
+
+      dict[id] = {...data, dependents, id, imports};
+      return dict;
+    }, {} as {[key:string] : SerializedEntry});
+
+  // 6. serialize
+  // const serialized = JSON.stringify(output.toObject(), null, 4);
+  const serialized = JSON.stringify(serializable, null, 4);
 
   if (outFile != null) {
     fs.writeFile(outFile, serialized, (err) => {
@@ -222,16 +252,6 @@ async function stratifyAction(path: string, command: Command) {
   } else {
     console.log(serialized);
   }
-}
-
-function uuid(): string {
-    var dt = new Date().getTime();
-    var uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c: string) {
-        var r = (dt + Math.random()*16)%16 | 0;
-        dt = Math.floor(dt/16);
-        return (c === 'x' ? r :(r & 0x3 | 0x8)).toString(16);
-    });
-    return uuid;
 }
 
 function firstMatch(match: null|string[]): null|string {
@@ -304,12 +324,6 @@ function addArchive(root: any) {
     .option('-o, --out-file <path>')
     .description('analyze the css dependency graph between css and html files')
     .action(analyze);
-
-  program
-    .command('hierarchy <path>')
-    .option('-o, --out-file <path>')
-    .action(hierarchyAction)
-    .description('stratify analyze output into graph of nodes and children');
 
   program
     .command('stratify <path>')

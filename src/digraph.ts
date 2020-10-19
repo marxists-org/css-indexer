@@ -50,7 +50,6 @@ export default class DirectedGraph {
     return Array.from(this.#adjacency.entries()).reduce((graph, [from, adjacency]) => {
       adjacency.forEach(to => {
         graph.addEdge(to, from);
-        // console.log(`${to} -> ${from}`);
       });
       return graph;
     }, new DirectedGraph());
