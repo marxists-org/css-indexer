@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import DirectedGraph from './digraph';
 import {Presets, SingleBar} from 'cli-progress';
-import {program, Command} from 'commander';
+import {Command} from 'commander';
 import {v4 as uuidv4} from 'uuid';
 
 type DependentsCount = {
