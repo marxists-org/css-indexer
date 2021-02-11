@@ -66,7 +66,6 @@ function mapFilepathToData(name: string, key:Symbol, graph: DirectedGraph<string
             ? "HTML"
             : "ROOT";
   if (type == null) throw new Error();
-  const dependents = Array.from(graph.getEdges(key));
   const path = name;
   return {dependentsCount: {direct:0, indirect:0}, name, path, type} as MappedData;
 }

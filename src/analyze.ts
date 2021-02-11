@@ -6,7 +6,7 @@ import {Glob} from 'glob';
 import {Observable, merge} from 'rxjs';
 import {Presets, SingleBar} from 'cli-progress';
 
-const stylesheetPathPattern = new RegExp(/<link.*href=(?:"|')(.*\.css)(?:"|')[^>]*>/,'gi');
+const stylesheetPathPattern = new RegExp(/<link(?:.|\n)+?(?=href)href=(?:.|\n)*?(?:"|')(.*\.css)(?:"|')[^>]*>/,'gi');
 const cssImportPattern = new RegExp(/(?:@import )(?:url\()*(?:'|")(.*)(?:"|'|")(?:\))*/g);
 
 const glob = (pattern: string[]|string): Observable<string> => {

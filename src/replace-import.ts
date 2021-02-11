@@ -9,8 +9,8 @@ import {Presets, SingleBar} from 'cli-progress';
 const readFileAsync = promisify(readFile);
 const writeFileAsync = promisify(writeFile);
 
-const stylesheetPathPattern = new RegExp(/<link.*href=(?:"|')(.*\.css)(?:"|')[^>]*>/,'gi');
-// const cssImportPattern = new RegExp(/(?:@import )(?:url\()*(?:'|")(.*)(?:"|'|")(?:\))*/g);
+const stylesheetPathPattern = new RegExp(/<link(?:.|\n)+?(?=href)href=(?:.|\n)*?(?:"|')(.*\.css)(?:"|')[^>]*>/,'gi');
+const cssImportPattern = new RegExp(/(?:@import )(?:url\()*(?:'|")(.*)(?:"|'|")(?:\))*/g);
 
 export default async function (path: string, command: Command) {
   const {cssSource, cssReplacement, root} = command.opts();
@@ -18,8 +18,8 @@ export default async function (path: string, command: Command) {
   const replacement = join(root, cssReplacement);
   const filePaths = command.args;
 
-  const bar = new SingleBar({}, Presets.shades_classic);
-  bar.start(filePaths.length, 0);
+  // const bar = new SingleBar({}, Presets.shades_classic);
+  // bar.start(filePaths.length, 0);
 
   for (let path of filePaths) {
     const filepath = join(root, path);
@@ -33,11 +33,18 @@ export default async function (path: string, command: Command) {
         throw new Error(`Could not detect file encoding for ${filepath}`);
       } else {
         let content = iconv.decode(buffer, encoding);
-        content = content.replace(stylesheetPathPattern, (statement: string, value: string) => {
-          const resolvedValue = join(root, resolve(value));
-          const relativeValue = relative(dir, resolvedValue);
-          if (relativeValue === relativeSource) return statement.replace(value, relativeReplacement);
-          throw new Error(`value (${value}) did not equal relativeSource (${relativeSource})`);
+        const pattern = filepath.match(".htm(l)*$") != null
+          ? stylesheetPathPattern
+          : filepath.match(".css$")
+            ? cssImportPattern
+            : null;
+        if (pattern == null) throw new Error('file did not match html nor css pattern');
+        content = content.replace(pattern, (statement: string, foundSource: string) => {
+          const resolvedFoundSource = resolve(dir, foundSource);
+          const processedFoundSource = join(root, resolvedFoundSource);
+          const relativeFoundSource = relative(dir, resolvedFoundSource);
+          if (relativeFoundSource === relativeSource) return statement.replace(foundSource, relativeReplacement);
+          throw new Error(`relativeFoundSource (${resolvedFoundSource}) did not equal relativeSource (${relativeFoundSource})`);
           return statement;
         });
         const output = iconv.encode(content.replace(/\r\n/g, '\n'), encoding);
@@ -48,7 +55,7 @@ export default async function (path: string, command: Command) {
       console.error(e);
       console.log(filepath + " ERROR");
     }
-    bar.increment();
+    // bar.increment();
   }
-  bar.stop();
+  // bar.stop();
 }

@@ -28,6 +28,9 @@ function compare(a: string[], b: string[]): number {
   }, 0);
 }
 
+/**
+ * returns a list of strings from b, missing in a)
+ */
 function delta(a: string[], b: string[]): string[] {
   const set = new Set(a);
   return b.filter(selector => !set.has(selector));
@@ -36,6 +39,7 @@ function delta(a: string[], b: string[]): string[] {
 type RenderProps = {
   contains: number|null,
   missing: string[],
+  superfluous: string[],
   total: number|null,
   percent: number|null,
   error: Error|null,
@@ -60,29 +64,32 @@ export default async function (_: string, command: Command) {
     .map(({selectors, path, error}): RenderProps => {
       let contains, total, percent = null;
       let missing: string[] = [];
+      let superfluous: string[] = [];
       if (error == null && selectors !== null) {
         contains = compare(baseSelectors, selectors!);
-        missing = delta(baseSelectors, selectors!);
+        missing = delta(selectors!, baseSelectors);
+        superfluous = delta(baseSelectors, selectors!);
         total = selectors!.length;
-        percent = ((contains / total) * 100).toFixed(2);
+        percent = ((contains / baseSelectors.length) * 100).toFixed(2);
       }
-      return {missing, contains, total, percent, error, path} as RenderProps;
+      return {missing, contains, total, percent, error, path, superfluous} as RenderProps;
     })
     .sort((a: RenderProps, b: RenderProps) => {
-      if ((a.percent || 0) > (b.percent || 0)) return -1;
-      if ((a.percent || 0) < (b.percent || 0)) return 1;
       if ((a.total || 0) > (b.total || 0)) return -1;
       if ((a.total || 0) < (b.total || 0)) return 1;
+      if ((a.percent || 0) > (b.percent || 0)) return -1;
+      if ((a.percent || 0) < (b.percent || 0)) return 1;
       return 0;
     })
-    .map(({missing, contains, total, percent, error, path}) => {
+    .map(({missing, contains, total, percent, error, path, superfluous}) => {
       if (error != null) {
         return `ERROR ${path}`;
       }
       let description = `${percent}% (${contains}/${total}) ${path}`;
       if (diff) {
         description += "\n";
-        missing.forEach(selector => description += (selector + "\n"));
+        missing.forEach(selector => description += ("- " + selector + "\n"));
+        superfluous.forEach(selector => description += ("+ " + selector + "\n"));
       }
       return description;
     });

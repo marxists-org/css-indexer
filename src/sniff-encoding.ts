@@ -1,7 +1,7 @@
 import {detect} from 'chardet';
 import iconv from 'iconv-lite';
 
-const stylesheetPathPattern = new RegExp(/<link.*href=(?:"|')(.*\.css)(?:"|')[^>]*>/,'i');
+const stylesheetPathPattern = new RegExp(/<link(?:.|\n)+?(?=href)href=(?:.|\n)*?(?:"|')(.*\.css)(?:"|')[^>]*>/,'gi');
 // const cssImportPattern = new RegExp(/(?:@import )(?:url\()*(?:'|")(.*)(?:"|'|")(?:\))*/g);
 // const charsetPattern = new RegExp(/<meta.+(?:charset="(.+)"|content="(?:.*)charset=([^"|;]+)).+>/,'gi');
 const charsetRegExp = new RegExp(/<meta.+(?:charset="(.+)"|content="(?:.*)charset=([^"|;]+)).+>/, 'im');
